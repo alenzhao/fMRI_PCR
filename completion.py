@@ -43,25 +43,25 @@ contrasts = ["horizontal checkerboard",
              "right button press (auditory cue)",
              "right button press (visual cue)"]
 
+test_set = ['left button press (auditory cue)']
+ref = [contrast for contrast in contrasts if contrast not in test_set]
+n_ref = len(ref)
+
 nifti_masker = NiftiMasker('mask_GM_forFunc.nii')
 affine = load(nifti_masker.mask).get_affine()
 
 # fetch the data
-imgs = datasets.fetch_localizer_contrasts(contrasts).cmaps
+ref_imgs = datasets.fetch_localizer_contrasts(ref).cmaps
+n_subjects = len(ref_imgs) / n_ref
 
 # Create a population mask
-one_contrast  = [img for img in imgs if 'horizontal' in img]
+one_contrast  = [img for img in ref_imgs if 'horizontal' in img]
 mask_ =  compute_multi_background_mask(one_contrast)
 mask_image = intersect_masks(['mask_GM_forFunc.nii', mask_])
 mask = mask_image.get_data()
 n_voxels = mask.sum()
 save(mask_image, '/tmp/mask.nii')
 nifti_masker = NiftiMasker(mask_image)
-#X = nifti_masker.fit_transform(imgs)
-
-# Create the data matrix
-n_contrasts, n_subjects = len(contrasts), len(imgs) / len(contrasts)
-shape = (n_voxels, n_subjects, n_contrasts)
 
 # write directory
 write_dir = op.join(getcwd(), 'results')
@@ -78,12 +78,12 @@ test_set = ['left button press (auditory cue)']
 do_soft_threshold = False
 nifti_masker = NiftiMasker(mask=mask_image, smoothing_fwhm=False,
                            standardize=False, memory='nilearn_cache')
+shape = mask.shape
 connectivity = grid_to_graph(n_x=shape[0], n_y=shape[1], n_z=shape[2],
                              mask=mask)
 
 # stat images
-ref = [contrast for contrast in contrasts if contrast not in test_set]
-n_ref = len(ref)
+
 
 #cross_validation scheme
 subject_label = np.repeat(np.arange(n_subjects), len(ref))
@@ -302,15 +302,15 @@ def low_rank_pca(cube, Y, cv, n_components=400, reg_rank=[6],
 
 
 cube, ward, parcel_connectivity = prepare_data(
-    imgs, connectivity, mask, n_clusters=n_clusters)
+    ref_imgs, connectivity, mask, n_clusters=n_clusters)
 
 
-if 0:
+if 1:
     results = {}
     for test_contrast in test_set:
         results_ = {}
-        imgs = np.concatenate([stat_img[test_contrast]])
-        Y = ward.transform(nifti_masker.fit_transform(imgs))
+        test_imgs = datasets.fetch_localizer_contrasts([test_contrast]).cmaps
+        Y = ward.transform(nifti_masker.fit_transform(test_imgs))
         print test_contrast
         results_['dummy'] = simplest(cube, Y, cv)
         results_['pcr_local'] = low_rank_local(cube, Y, cv)
@@ -350,8 +350,8 @@ else:
     ratios = []
     stats = []
     for test_contrast in test_set:
-        imgs = np.concatenate([stat_img[test_contrast]])
-        Y = ward.transform(nifti_masker.fit_transform(imgs))
+        test_imgs = datasets.fetch_localizer_contrasts([test_contrast]).cmaps
+        Y = ward.transform(nifti_masker.fit_transform(test_imgs))
         print test_contrast
         sim = simplest(cube, Y, cv)
         print sim.sum()
