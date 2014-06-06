@@ -1,8 +1,10 @@
-""" This script attempts at performing data completion based 
-on the localizer public data
+""" This script attempts at performing data completion
+(i.e. predicting a new contrast given previous contrasts)
+based on the localizer public dataset.
 
 Author: Bertrand Thirion, 2014
 """
+
 import numpy as np
 from os import mkdir, getcwd, path as op
 import warnings
@@ -31,11 +33,11 @@ from nilearn.masking import compute_multi_background_mask, intersect_masks
 ###############################################################################
 # Get the data
 
-# note : the following contrasts correspond to the raw conditions 
+# note : the following contrasts correspond to the raw conditions
 # of the localizer experiment
 contrasts = ["horizontal checkerboard",
              "vertical checkerboard",
-             'sentence listening',"sentence reading",
+             'sentence listening', "sentence reading",
              "calculation (auditory cue)",
              "calculation (visual cue)",
              "left button press (auditory cue)",
@@ -55,8 +57,8 @@ ref_imgs = datasets.fetch_localizer_contrasts(ref).cmaps
 n_subjects = len(ref_imgs) / n_ref
 
 # Create a population mask
-one_contrast  = [img for img in ref_imgs if 'horizontal' in img]
-mask_ =  compute_multi_background_mask(one_contrast)
+one_contrast = [img for img in ref_imgs if 'horizontal' in img]
+mask_ = compute_multi_background_mask(one_contrast)
 mask_image = intersect_masks(['mask_GM_forFunc.nii', mask_])
 mask = mask_image.get_data()
 n_voxels = mask.sum()
@@ -72,7 +74,7 @@ if not op.exists(write_dir):
 ###############################################################################
 
 # Global parameters
-n_clusters = 2000
+n_clusters = 5000
 
 test_set = ['left button press (auditory cue)']
 do_soft_threshold = False
@@ -82,15 +84,11 @@ shape = mask.shape
 connectivity = grid_to_graph(n_x=shape[0], n_y=shape[1], n_z=shape[2],
                              mask=mask)
 
-# stat images
-
-
 #cross_validation scheme
 subject_label = np.repeat(np.arange(n_subjects), len(ref))
 cv = ShuffleSplit(n_subjects, n_iter=20, train_size=.9,
                   test_size=.1, random_state=2)
 
-        
 
 def do_parcel_connectivity(mask, n_clusters, ward):
     # Estimate parcel connectivity
@@ -114,7 +112,7 @@ def prepare_data(imgs, connectivity, mask, n_clusters=5000, n_components=100):
     W = ward.transform(Z)
     del Z
     # data cube is a more convenient representation
-    cube = np.array([W[subject_label == subject] 
+    cube = np.array([W[subject_label == subject]
                      for subject in np.arange(n_subjects)])
     # parcel connectivity
     parcel_connectivity = do_parcel_connectivity(mask, n_clusters, ward)
@@ -178,7 +176,7 @@ def scorer2(x, y, pen, n_components, clf, cv, tuned_parameters):
 
 def low_rank_regional(cube, y, cv, p_connectivity, n_components=[4],
                       fit_intercept=True, pen='rank'):
-    """ 
+    """
     penalty: {'rank', 'ridge', 'lasso'} string
     """
     tuned_parameters = []
@@ -198,12 +196,12 @@ def low_rank_regional(cube, y, cv, p_connectivity, n_components=[4],
         clf = KNeighborsRegressor()
     else:
         clf = LinearRegression(fit_intercept=fit_intercept)
-        
+
     sse = Parallel(n_jobs=1)(delayed(scorer2)(
             cube.T[p_connectivity[i]].T, Y.T[i], pen, n_components, clf,
-            cv, tuned_parameters) 
+            cv, tuned_parameters)
                               for i in range(len(Y.T)))
-    
+
     return np.array(sse)
 
 
@@ -225,9 +223,10 @@ def scorer(xT, y, pen, n_components, clf, cv, tuned_parameters):
             sse += np.mean((y_test - pclf.predict(x_test)) ** 2)
     return sse
 
+
 def low_rank_local(cube, y, cv, n_components=[4], fit_intercept=True,
                    pen='rank'):
-    """ 
+    """
     penalty: {'rank', 'ridge', 'lasso', 'tls'} string
     """
     tuned_parameters = []
@@ -247,9 +246,8 @@ def low_rank_local(cube, y, cv, n_components=[4], fit_intercept=True,
     else:
         clf = LinearRegression(fit_intercept=fit_intercept)
 
-
     sse = Parallel(n_jobs=1)(delayed(scorer)(xT, y, pen, n_components, clf,
-                                              cv, tuned_parameters) 
+                                              cv, tuned_parameters)
                               for (xT, y) in zip(cube.T, Y.T))
 
     return np.array(sse)
@@ -306,6 +304,7 @@ cube, ward, parcel_connectivity = prepare_data(
 
 
 if 1:
+    # run the actual experiment: compute scores using various methods
     results = {}
     for test_contrast in test_set:
         results_ = {}
@@ -342,11 +341,12 @@ if 1:
         for (key, values) in results_.iteritems():
             print key, values.sum()
         results[test_contrast] = results_
-        
-    fid = open('results_%s.pickle' % test_set, 'w')
+
+    fid = open(op.join(write_dir, 'results_%s.pickle' % test_set, 'w'))
     pickle.dump(results, fid)
     fid.close()
 else:
+    # do an exploratory analysis
     ratios = []
     stats = []
     for test_contrast in test_set:
@@ -362,23 +362,17 @@ else:
 
         ratio_img = nifti_masker.inverse_transform(
             ward.inverse_transform(ratio))
-        save(ratio_img, '/tmp/ratio_%s.nii' % test_contrast)
+        save(ratio_img, op.join(write_dir, 'ratio_%s.nii' % test_contrast))
         mean_img = nifti_masker.inverse_transform(ward.inverse_transform(stat))
-        save(mean_img, '/tmp/stat_%s.nii' % test_contrast)
+        save(mean_img, op.join(write_dir, 'stat_%s.nii' % test_contrast))
         stats.append(stat)
         ratios.append(ratio)
-    
+
     ratios = np.array(ratios)
     stats = np.array(stats)
     stat = np.sqrt(np.sum(stats ** 2, 0))
     ratio = np.mean(ratios, 0)
     save(nifti_masker.inverse_transform(ward.inverse_transform(ratio)),
-         '/tmp/ratio.nii')
+         op.join(write_dir, 'ratio.nii'))
     save(nifti_masker.inverse_transform(ward.inverse_transform(stat)),
-         '/tmp/stat.nii')
-
-
-
-
-
-
+         op.join(write_dir, 'stat.nii'))
