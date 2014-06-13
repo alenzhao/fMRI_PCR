@@ -342,7 +342,7 @@ if 1:
             print key, values.sum()
         results[test_contrast] = results_
 
-    fid = open(op.join(write_dir, 'results_%s.pickle' % test_set, 'w'))
+    fid = open(op.join(write_dir, 'results_%s.pickle' % test_set), 'w')
     pickle.dump(results, fid)
     fid.close()
 else:
